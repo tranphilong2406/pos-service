@@ -8,6 +8,7 @@ import (
 	"StoreServer/utils/response"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -25,52 +26,86 @@ func CreateOrder(c *gin.Context) {
 		return
 	}
 
-	for idx := range len(req.Products) {
+	decrementedIndices := make([]int, 0, len(req.Products))
+
+	// Atomically deduct stock with pre-condition stock >= quantity
+	for idx, prodItem := range req.Products {
+		if prodItem.Quantity <= 0 {
+			rollbackStock(req.Products, decrementedIndices)
+			c.JSON(http.StatusBadRequest, response.Response{
+				Code:    http.StatusBadRequest,
+				Message: fmt.Sprintf("Invalid quantity for product ID %s", prodItem.ID.Hex()),
+			})
+			return
+		}
+
 		filter := bson.M{
-			"_id": req.Products[idx].ID,
+			"_id":          prodItem.ID,
+			"deleted_time": nil,
+			"stock":        bson.M{"$gte": prodItem.Quantity},
+		}
+		update := bson.M{
+			"$inc": bson.M{"stock": -prodItem.Quantity},
+			"$set": bson.M{"updated_time": time.Now()},
 		}
 
-		prod := models.ProductDB.QueryOne(filter)
-		if prod.Code != http.StatusOK {
-			c.JSON(prod.Code, prod)
+		updateRes := models.ProductDB.UpdateRaw(filter, update)
+		if updateRes.Code != http.StatusOK {
+			// Insufficient stock or product not found -> Roll back already decremented items
+			rollbackStock(req.Products, decrementedIndices)
+			c.JSON(http.StatusBadRequest, response.Response{
+				Code:    http.StatusBadRequest,
+				Message: fmt.Sprintf("Insufficient stock or product not found for ID: %s", prodItem.ID.Hex()),
+			})
 			return
 		}
 
-		update := prod.Data.(*models.Product)
-
-		update.Stock -= req.Products[idx].Quantity
-
-		updated := models.ProductDB.UpdateOne(filter, update)
-		if updated.Code != http.StatusOK {
-			c.JSON(updated.Code, updated)
-			return
-		}
+		decrementedIndices = append(decrementedIndices, idx)
 	}
 
 	res := models.OrderDB.Create(req)
+	if res.Code != http.StatusCreated && res.Code != http.StatusOK {
+		rollbackStock(req.Products, decrementedIndices)
+		c.JSON(res.Code, res)
+		return
+	}
+
 	c.JSON(res.Code, res)
+}
+
+func rollbackStock(products []models.ProductOrder, indices []int) {
+	for _, idx := range indices {
+		prod := products[idx]
+		filter := bson.M{"_id": prod.ID}
+		update := bson.M{
+			"$inc": bson.M{"stock": prod.Quantity},
+			"$set": bson.M{"updated_time": time.Now()},
+		}
+		_ = models.ProductDB.UpdateRaw(filter, update)
+	}
 }
 
 func GetOrder(c *gin.Context) {
 	page := utils.ParseInt(c.Query("page"), 1)
 	pageSize := utils.ParseInt(c.Query("page_size"), 10)
 	status := c.Query("status")
-
-	timeStart, timeEnd := gettime.RangeFromKeyword(c.Query("time_range"))
+	timeRange := c.Query("time_range")
 
 	filter := bson.M{
 		"deleted_time": nil,
-		"created_time": bson.M{
+	}
+
+	if timeRange != "" {
+		timeStart, timeEnd := gettime.RangeFromKeyword(timeRange)
+		filter["created_time"] = bson.M{
 			"$gte": timeStart,
 			"$lte": timeEnd,
-		},
+		}
 	}
 
-	if status != "all" {
+	if status != "" && status != "all" {
 		filter["status"] = utils.ParseBool(status)
 	}
-
-	fmt.Println("filter:", filter)
 
 	offset := (page - 1) * pageSize
 	res := models.OrderDB.Query(filter, offset, pageSize)
@@ -93,7 +128,22 @@ func UpdateStatusOrder(c *gin.Context) {
 		return
 	}
 
-	filter := bson.M{"_id": req.ID}
+	id := c.Param("id")
+	if id != "" {
+		objID, err := bson.ObjectIDFromHex(id)
+		if err != nil {
+			response.MyResponse.Error(c, myerror.AnyError(http.StatusBadRequest, err))
+			return
+		}
+		req.ID = objID
+	}
+
+	if req.ID.IsZero() {
+		response.MyResponse.Error(c, myerror.EmptyParam())
+		return
+	}
+
+	filter := bson.M{"_id": req.ID, "deleted_time": nil}
 	update := bson.M{"status": req.Status}
 
 	res := models.OrderDB.UpdateOne(filter, update)
@@ -109,16 +159,16 @@ func GetOrderByID(c *gin.Context) {
 
 	objID, err := bson.ObjectIDFromHex(id)
 	if err != nil {
-		response.MyResponse.Error(c, myerror.AnyError(http.StatusInternalServerError, err))
+		response.MyResponse.Error(c, myerror.AnyError(http.StatusBadRequest, err))
 		return
 	}
 
 	filter := bson.M{
-		"_id": objID,
+		"_id":          objID,
+		"deleted_time": nil,
 	}
 
 	result := models.OrderDB.QueryOne(filter)
-
 	c.JSON(result.Code, result)
 }
 
@@ -137,10 +187,11 @@ func DeleteOrder(c *gin.Context) {
 	}
 
 	filter := bson.M{
-		"_id": objID,
+		"_id":          objID,
+		"deleted_time": nil,
 	}
 
 	res := models.OrderDB.DeleteOne(filter)
-
 	c.JSON(res.Code, res)
 }
+

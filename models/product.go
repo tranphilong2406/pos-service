@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
+
 
 var ProductDB = job.DB{
 	ColName:     "product",
@@ -23,8 +25,6 @@ type Product struct {
 	Description string        `bson:"description" json:"description" form:"description"`
 	Image       string        `bson:"image" json:"image" form:"image" `
 	Stock       int           `bson:"stock" json:"stock" form:"stock"`
-	BuyPrice    int           `bson:"buy_price" json:"buy_price" form:"buy_price"`
-	SellPrice   int           `bson:"sell_price" json:"sell_price" form:"sell_price"`
 	CreatedTime *time.Time    `json:"created_time" bson:"created_time"`
 	UpdatedTime *time.Time    `json:"updated_time" bson:"updated_time"`
 	DeletedTime *time.Time    `json:"deleted_time" bson:"deleted_time,omitempty"`
@@ -48,22 +48,17 @@ func (p *Product) Validate() response.Response {
 	if p.Name == "" {
 		res.Code = http.StatusBadRequest
 		res.Message = "Name cannot be empty"
-	}
-	if p.BuyPrice <= 0 {
-		res.Code = http.StatusBadRequest
-		res.Message = "Buy Price must be greater than 0"
-	}
-	if p.SellPrice <= 0 {
-		res.Code = http.StatusBadRequest
-		res.Message = "Sell Price must be greater than 0"
+		return res
 	}
 	if p.Stock < 0 {
 		res.Code = http.StatusBadRequest
 		res.Message = "Stock cannot be negative"
+		return res
 	}
 
 	return res
 }
+
 
 type ListProduct struct {
 	Products []Product `bson:"products" json:"products"`
@@ -71,4 +66,11 @@ type ListProduct struct {
 
 func InitProductDB() {
 	ProductDB.Init("store")
+	_ = ProductDB.EnsureIndexes([]mongo.IndexModel{
+		{Keys: bson.D{{Key: "deleted_time", Value: 1}, {Key: "created_time", Value: -1}}},
+		{Keys: bson.D{{Key: "category_id", Value: 1}, {Key: "deleted_time", Value: 1}}},
+		{Keys: bson.D{{Key: "supplier_id", Value: 1}, {Key: "deleted_time", Value: 1}}},
+		{Keys: bson.D{{Key: "name", Value: 1}}},
+	})
 }
+

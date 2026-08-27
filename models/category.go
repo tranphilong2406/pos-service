@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 var CategoryDB = job.DB{
@@ -34,6 +35,7 @@ func (c Category) Validate() response.Response {
 	if c.Name == "" {
 		res.Code = http.StatusBadRequest
 		res.Message = "Name cannot be empty"
+		return res
 	}
 
 	return res
@@ -41,4 +43,9 @@ func (c Category) Validate() response.Response {
 
 func InitCategoryDB() {
 	CategoryDB.Init("store")
+	_ = CategoryDB.EnsureIndexes([]mongo.IndexModel{
+		{Keys: bson.D{{Key: "deleted_time", Value: 1}, {Key: "created_time", Value: -1}}},
+		{Keys: bson.D{{Key: "name", Value: 1}}},
+	})
 }
+

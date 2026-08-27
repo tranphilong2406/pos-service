@@ -6,6 +6,8 @@ import (
 	myerror "StoreServer/utils/error"
 	"StoreServer/utils/response"
 	"net/http"
+	"regexp"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -25,7 +27,6 @@ func CreateProduct(c *gin.Context) {
 	}
 
 	res := models.ProductDB.Create(req)
-
 	c.JSON(res.Code, res)
 }
 
@@ -48,7 +49,7 @@ func GetProduct(c *gin.Context) {
 	}
 
 	if name != "" {
-		filter["name"] = bson.M{"$regex": name, "$options": "i"}
+		filter["name"] = bson.M{"$regex": regexp.QuoteMeta(name), "$options": "i"}
 	}
 
 	offset := (page - 1) * pageSize
@@ -59,7 +60,6 @@ func GetProduct(c *gin.Context) {
 	}
 
 	res.Data = res.Data.([]models.Product)
-
 	c.JSON(res.Code, res)
 }
 
@@ -87,32 +87,30 @@ func UpdateProduct(c *gin.Context) {
 		return
 	}
 
+	updateDoc := bson.M{
+		"name":         req.Name,
+		"description":  req.Description,
+		"stock":        req.Stock,
+		"updated_time": time.Now(),
+	}
+
+
+	if req.CategoryID != "" {
+		updateDoc["category_id"] = req.CategoryID
+	}
+	if req.SupplierID != "" {
+		updateDoc["supplier_id"] = req.SupplierID
+	}
+	if req.Image != "" {
+		updateDoc["image"] = req.Image
+	}
+
 	filter := bson.M{
 		"_id":          objID,
 		"deleted_time": nil,
 	}
 
-	res := models.ProductDB.QueryOne(filter)
-	if res.Code != http.StatusOK {
-		c.JSON(res.Code, res)
-		return
-	}
-
-	update := res.Data.(*models.Product)
-
-	if req.Image != "" {
-		update.Image = req.Image
-	}
-
-	update.Name = req.Name
-	update.Description = req.Description
-
-	update.Stock = req.Stock
-	update.SellPrice = req.SellPrice
-	update.BuyPrice = req.BuyPrice
-
-	updating := models.ProductDB.UpdateOne(filter, update)
-
+	updating := models.ProductDB.UpdateRaw(filter, bson.M{"$set": updateDoc})
 	c.JSON(updating.Code, updating)
 }
 
@@ -131,10 +129,11 @@ func DeleteProduct(c *gin.Context) {
 	}
 
 	filter := bson.M{
-		"_id": objID,
+		"_id":          objID,
+		"deleted_time": nil,
 	}
 
 	res := models.ProductDB.DeleteOne(filter)
-
 	c.JSON(res.Code, res)
 }
+

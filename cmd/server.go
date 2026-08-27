@@ -18,7 +18,7 @@ import (
 
 func SetupServer() {
 	con := config.GetConfig()
-	errs := make(chan error)
+	errs := make(chan error, 1)
 
 	//connecting to db
 	fmt.Println("Connecting to database...")
@@ -112,9 +112,12 @@ func SetHandler() *gin.Engine {
 		apiRoute.GET("/orders/:id", api.GetOrderByID)
 		apiRoute.DELETE("/orders/:id", middleware.CheckRole("admin", "manager"), api.DeleteOrder)
 		apiRoute.PUT("/orders/", middleware.CheckRole("admin", "manager"), api.UpdateStatusOrder)
+		apiRoute.PUT("/orders/:id/status", middleware.CheckRole("admin", "manager"), api.UpdateStatusOrder)
 		// User routes
 		apiRoute.POST("/users/", middleware.CheckRole("admin"), api.CreateUser)
 		apiRoute.PUT("/users/", middleware.CheckRole("admin"), api.UpdateUser)
+		apiRoute.PUT("/users/:id", middleware.CheckRole("admin"), api.UpdateUser)
+		apiRoute.DELETE("/users/:id", middleware.CheckRole("admin"), api.DeleteUser)
 		apiRoute.GET("/users/", middleware.CheckRole("admin"), api.GetUser)
 		// Received Order
 		apiRoute.POST("/purchases/", middleware.CheckRole("admin", "manager"), api.CreatePurchase)
@@ -132,3 +135,4 @@ func SetHandler() *gin.Engine {
 	}
 	return r
 }
+

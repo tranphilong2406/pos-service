@@ -6,6 +6,8 @@ import (
 	myerror "StoreServer/utils/error"
 	"StoreServer/utils/response"
 	"net/http"
+	"regexp"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -19,8 +21,12 @@ func CreateCategory(c *gin.Context) {
 		return
 	}
 
-	res := models.CategoryDB.Create(req)
+	if ok := req.Validate(); ok.Code != http.StatusOK {
+		c.JSON(ok.Code, ok)
+		return
+	}
 
+	res := models.CategoryDB.Create(req)
 	c.JSON(res.Code, res)
 }
 
@@ -34,14 +40,13 @@ func GetCategory(c *gin.Context) {
 
 	if name != "" {
 		filter["name"] = bson.M{
-			"$regex":   name,
+			"$regex":   regexp.QuoteMeta(name),
 			"$options": "i",
 		}
 	}
 
 	offset := (page - 1) * pageSize
 	res := models.CategoryDB.Query(filter, offset, pageSize)
-
 	c.JSON(res.Code, res)
 }
 
@@ -73,24 +78,18 @@ func UpdateCategory(c *gin.Context) {
 		return
 	}
 
+	updateDoc := bson.M{
+		"name":         req.Name,
+		"description":  req.Description,
+		"updated_time": time.Now(),
+	}
+
 	filter := bson.M{
 		"_id":          objID,
 		"deleted_time": nil,
 	}
 
-	res := models.CategoryDB.QueryOne(filter)
-	if res.Code != http.StatusOK {
-		c.JSON(res.Code, res)
-		return
-	}
-
-	update := res.Data.(*models.Category)
-
-	update.Name = req.Name
-	update.Description = req.Description
-
-	updating := models.CategoryDB.UpdateOne(filter, update)
-
+	updating := models.CategoryDB.UpdateRaw(filter, bson.M{"$set": updateDoc})
 	c.JSON(updating.Code, updating)
 }
 
@@ -109,10 +108,11 @@ func DeleteCategory(c *gin.Context) {
 	}
 
 	filter := bson.M{
-		"_id": objID,
+		"_id":          objID,
+		"deleted_time": nil,
 	}
 
 	res := models.CategoryDB.DeleteOne(filter)
-
 	c.JSON(res.Code, res)
 }
+

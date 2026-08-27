@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 var OrderDB = job.DB{
@@ -21,7 +22,7 @@ type Order struct {
 	Products    []ProductOrder `json:"products" bson:"products" binding:"required"`
 	TotalPrice  float64        `json:"total_price" bson:"total_price" binding:"required"`
 	Discount    float64        `json:"discount" bson:"discount"`
-	Status      bool           `json:"status" bson:"status"` // 0 is pay 1 is not pay
+	Status      bool           `json:"status" bson:"status"` // false is unpaid, true is paid
 	CreatedTime *time.Time     `json:"created_time" bson:"created_time"`
 	UpdatedTime *time.Time     `json:"updated_time" bson:"updated_time"`
 	DeletedTime *time.Time     `json:"deleted_time" bson:"deleted_time,omitempty"`
@@ -42,10 +43,12 @@ func (o *Order) Validate() response.Response {
 	if len(o.Products) < 1 {
 		res.Code = http.StatusBadRequest
 		res.Message = "At least 1 product in order"
+		return res
 	}
 	if o.TotalPrice <= 0 {
 		res.Code = http.StatusBadRequest
 		res.Message = "Price must be greater than 0"
+		return res
 	}
 
 	return res
@@ -53,4 +56,9 @@ func (o *Order) Validate() response.Response {
 
 func InitOrderDB() {
 	OrderDB.Init("store")
+	_ = OrderDB.EnsureIndexes([]mongo.IndexModel{
+		{Keys: bson.D{{Key: "deleted_time", Value: 1}, {Key: "created_time", Value: -1}}},
+		{Keys: bson.D{{Key: "status", Value: 1}, {Key: "created_time", Value: -1}}},
+	})
 }
+

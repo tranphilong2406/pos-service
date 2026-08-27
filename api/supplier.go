@@ -6,6 +6,8 @@ import (
 	myerror "StoreServer/utils/error"
 	"StoreServer/utils/response"
 	"net/http"
+	"regexp"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -25,7 +27,6 @@ func CreateSupplier(c *gin.Context) {
 	}
 
 	res := models.SupplierDB.Create(req)
-
 	c.JSON(res.Code, res)
 }
 
@@ -38,7 +39,7 @@ func GetSupplier(c *gin.Context) {
 	}
 
 	if name != "" {
-		filter["name"] = bson.M{"$regex": name, "$options": "i"}
+		filter["name"] = bson.M{"$regex": regexp.QuoteMeta(name), "$options": "i"}
 	}
 	offset := (page - 1) * pageSize
 	res := models.SupplierDB.Query(filter, offset, pageSize)
@@ -48,7 +49,6 @@ func GetSupplier(c *gin.Context) {
 	}
 
 	res.Data = res.Data.([]models.Supplier)
-
 	c.JSON(res.Code, res)
 }
 
@@ -77,26 +77,20 @@ func UpdateSupplier(c *gin.Context) {
 		return
 	}
 
+	updateDoc := bson.M{
+		"name":         req.Name,
+		"phone":        req.Phone,
+		"email":        req.Email,
+		"address":      req.Address,
+		"updated_time": time.Now(),
+	}
+
 	filter := bson.M{
 		"_id":          objID,
 		"deleted_time": nil,
 	}
 
-	res := models.SupplierDB.QueryOne(filter)
-	if res.Code != http.StatusOK {
-		c.JSON(res.Code, res)
-		return
-	}
-
-	update := res.Data.(*models.Supplier)
-
-	update.Name = req.Name
-	update.Phone = req.Phone
-	update.Email = req.Email
-	update.Address = req.Address
-
-	updating := models.SupplierDB.UpdateOne(filter, update)
-
+	updating := models.SupplierDB.UpdateRaw(filter, bson.M{"$set": updateDoc})
 	c.JSON(updating.Code, updating)
 }
 
@@ -115,10 +109,11 @@ func DeleteSupplier(c *gin.Context) {
 	}
 
 	filter := bson.M{
-		"_id": objID,
+		"_id":          objID,
+		"deleted_time": nil,
 	}
 
 	res := models.SupplierDB.DeleteOne(filter)
-
 	c.JSON(res.Code, res)
 }
+

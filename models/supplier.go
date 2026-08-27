@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 var SupplierDB = job.DB{
@@ -36,16 +37,19 @@ func (s Supplier) Validate() response.Response {
 	if s.Name == "" {
 		res.Code = http.StatusBadRequest
 		res.Message = "Name cannot be empty"
+		return res
 	}
 
 	if s.Phone == "" {
 		res.Code = http.StatusBadRequest
 		res.Message = "Phone cannot be empty"
+		return res
 	}
 
 	if s.Email == "" {
 		res.Code = http.StatusBadRequest
 		res.Message = "Email cannot be empty"
+		return res
 	}
 
 	return res
@@ -53,4 +57,9 @@ func (s Supplier) Validate() response.Response {
 
 func InitSupplierDB() {
 	SupplierDB.Init("store")
+	_ = SupplierDB.EnsureIndexes([]mongo.IndexModel{
+		{Keys: bson.D{{Key: "deleted_time", Value: 1}, {Key: "created_time", Value: -1}}},
+		{Keys: bson.D{{Key: "name", Value: 1}}},
+	})
 }
+

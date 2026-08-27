@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 type purchaseStatus string
@@ -57,10 +58,12 @@ func (r Purchase) Validate() response.Response {
 	if len(r.Products) < 1 {
 		res.Code = http.StatusBadRequest
 		res.Message = "At least 1 product in order"
+		return res
 	}
 	if r.TotalPrice <= 0 {
 		res.Code = http.StatusBadRequest
 		res.Message = "Price must be greater than 0"
+		return res
 	}
 
 	return res
@@ -68,4 +71,10 @@ func (r Purchase) Validate() response.Response {
 
 func InitPurchaseDB() {
 	PurchaseDB.Init("store")
+	_ = PurchaseDB.EnsureIndexes([]mongo.IndexModel{
+		{Keys: bson.D{{Key: "deleted_time", Value: 1}, {Key: "created_time", Value: -1}}},
+		{Keys: bson.D{{Key: "status", Value: 1}, {Key: "created_time", Value: -1}}},
+		{Keys: bson.D{{Key: "supplier_id", Value: 1}, {Key: "deleted_time", Value: 1}}},
+	})
 }
+

@@ -1,8 +1,8 @@
 package jwt
 
 import (
+	"StoreServer/config"
 	"errors"
-	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -17,9 +17,15 @@ type Claims struct {
 }
 
 func GenerateToken(userID bson.ObjectID, username, role string) (string, error) {
-	secret := os.Getenv("JWT_SECRET")
+	cfg := config.GetConfig()
+	secret := cfg.JWTSecret
 	if secret == "" {
-		return "", errors.New("no Key") // bạn có thể định nghĩa lỗi này riêng
+		return "", errors.New("JWT secret is not configured")
+	}
+
+	expiryHours := cfg.JWTExpiryHours
+	if expiryHours <= 0 {
+		expiryHours = 24
 	}
 
 	claims := Claims{
@@ -27,8 +33,9 @@ func GenerateToken(userID bson.ObjectID, username, role string) (string, error) 
 		Username: username,
 		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
-			IssuedAt: jwt.NewNumericDate(time.Now()),
-			Issuer:   "stationery_store",
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Duration(expiryHours) * time.Hour)),
+			Issuer:    "stationery_store",
 		},
 	}
 
@@ -42,9 +49,14 @@ func GenerateToken(userID bson.ObjectID, username, role string) (string, error) 
 }
 
 func ValidateToken(tokenString string) (bool, error) {
-	secret := os.Getenv("JWT_SECRET")
+	cfg := config.GetConfig()
+	secret := cfg.JWTSecret
+	if secret == "" {
+		return false, errors.New("JWT secret is not configured")
+	}
+
 	_, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		return secret, nil
+		return []byte(secret), nil
 	})
 
 	if err != nil {
@@ -55,14 +67,17 @@ func ValidateToken(tokenString string) (bool, error) {
 }
 
 func ParseToken(tokenString string) (*Claims, error) {
-	secret := os.Getenv("JWT_SECRET")
+	cfg := config.GetConfig()
+	secret := cfg.JWTSecret
+	if secret == "" {
+		return nil, errors.New("JWT secret is not configured")
+	}
 
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
 		return []byte(secret), nil
 	})
 
 	if err != nil {
-		println("err:", err.Error())
 		return nil, err
 	}
 
@@ -72,3 +87,4 @@ func ParseToken(tokenString string) (*Claims, error) {
 
 	return nil, errors.New("invalid token")
 }
+

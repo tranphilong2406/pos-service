@@ -3,7 +3,6 @@ package middleware
 import (
 	"StoreServer/utils/jwt"
 	"StoreServer/utils/response"
-	"fmt"
 	"net/http"
 	"strings"
 
@@ -12,8 +11,12 @@ import (
 
 func CheckLogin() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		token := c.Request.Header.Get("Token")
-		if token == "" || !strings.HasPrefix(token, "Bearer ") {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			authHeader = c.GetHeader("Token")
+		}
+
+		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, response.Response{
 				Code:    http.StatusUnauthorized,
 				Message: "Unauthorized",
@@ -21,8 +24,7 @@ func CheckLogin() gin.HandlerFunc {
 			return
 		}
 
-		token = strings.TrimPrefix(token, "Bearer ")
-		fmt.Println("token:", token)
+		token := strings.TrimPrefix(authHeader, "Bearer ")
 
 		user, err := jwt.ParseToken(token)
 		if err != nil {
@@ -40,8 +42,12 @@ func CheckLogin() gin.HandlerFunc {
 }
 
 func CheckRole(allowedRoles ...string) gin.HandlerFunc {
-	return func(c *gin.Context) {
+	roleMap := make(map[string]struct{}, len(allowedRoles))
+	for _, role := range allowedRoles {
+		roleMap[role] = struct{}{}
+	}
 
+	return func(c *gin.Context) {
 		roleValue, exists := c.Get("role")
 		if !exists {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, response.Response{
@@ -60,18 +66,15 @@ func CheckRole(allowedRoles ...string) gin.HandlerFunc {
 			return
 		}
 
-		// Kiểm tra role có nằm trong danh sách allowedRoles không
-		for _, role := range allowedRoles {
-			if userRole == role {
-				c.Next()
-				return
-			}
+		if _, allowed := roleMap[userRole]; allowed {
+			c.Next()
+			return
 		}
 
-		// Nếu không có role phù hợp
 		c.AbortWithStatusJSON(http.StatusForbidden, response.Response{
 			Code:    http.StatusForbidden,
 			Message: "Permission denied",
 		})
 	}
 }
+

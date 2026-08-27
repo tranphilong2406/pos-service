@@ -42,7 +42,7 @@ func DBConnect() {
 			log.Printf("Succeeded: %v\n", e.Reply)
 		},
 		Failed: func(_ context.Context, e *event.CommandFailedEvent) {
-			log.Fatalf("Succeeded: %v\n", e.Failure)
+			log.Fatalf("Failed: %v\n", e.Failure)
 		},
 	}
 	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
@@ -71,9 +71,24 @@ func GetDB(dbname string) *mongo.Database {
 	return conn.Database(dbname)
 }
 
+func GetClient() *mongo.Client {
+	return conn
+}
+
+func (d *DB) GetCollection() *mongo.Collection {
+	if d.collection == nil && d.db != nil {
+		d.collection = d.db.Collection(d.ColName)
+	}
+	return d.collection
+}
+
 func (d *DB) convertToBson(inc interface{}) (bson.M, error) {
 	if inc == nil {
 		return bson.M{}, nil
+	}
+
+	if m, ok := inc.(bson.M); ok {
+		return m, nil
 	}
 
 	mar, err := bson.Marshal(inc)
@@ -113,8 +128,28 @@ func (d *DB) convertToObj(inc bson.M) (interface{}, error) {
 func (d *DB) Init(dbname string) {
 	d.DBName = dbname
 	d.db = GetDB(d.DBName)
-	d.collection = d.db.Collection(dbname)
+	d.collection = d.db.Collection(d.ColName)
+}
 
+func (d *DB) EnsureIndexes(indexes []mongo.IndexModel) error {
+	if len(indexes) == 0 {
+		return nil
+	}
+	col := d.GetCollection()
+	if col == nil {
+		return fmt.Errorf("collection %s not initialized", d.ColName)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	_, err := col.Indexes().CreateMany(ctx, indexes)
+	if err != nil {
+		logger.GetLogger().Error(fmt.Sprintf("Failed to create indexes for %s: %v", d.ColName, err))
+		return err
+	}
+	logger.GetLogger().Info(fmt.Sprintf("Indexes ensured for collection: %s", d.ColName))
+	return nil
 }
 
 func (d *DB) NewObject() interface{} {
@@ -131,7 +166,8 @@ func (d *DB) NewList(slot int) interface{} {
 }
 
 func (d *DB) Count(filter interface{}) response.Response {
-	count, err := d.collection.CountDocuments(context.Background(), filter)
+	col := d.GetCollection()
+	count, err := col.CountDocuments(context.Background(), filter)
 	if err != nil {
 		return response.Response{
 			Message: err.Error(),
@@ -149,14 +185,15 @@ func (d *DB) Count(filter interface{}) response.Response {
 	}
 }
 
-// Query get all objet in DB
+// Query get all objects in DB
 func (d *DB) Query(inc interface{}, offset, limit int) response.Response {
+	col := d.GetCollection()
 	findOptions := options.Find()
 	findOptions.SetLimit(int64(limit))
 	findOptions.SetSkip(int64(offset))
 	findOptions.SetSort(bson.M{"created_time": -1})
 
-	total, err := d.db.Collection(d.ColName).CountDocuments(context.TODO(), inc)
+	total, err := col.CountDocuments(context.TODO(), inc)
 	if err != nil {
 		return response.Response{
 			Message: "Count Error: " + err.Error(),
@@ -165,7 +202,7 @@ func (d *DB) Query(inc interface{}, offset, limit int) response.Response {
 		}
 	}
 
-	cursor, err := d.db.Collection(d.ColName).Find(context.TODO(), inc, findOptions)
+	cursor, err := col.Find(context.TODO(), inc, findOptions)
 	if err != nil {
 		return response.Response{
 			Message: "DB Error: " + err.Error(),
@@ -186,11 +223,16 @@ func (d *DB) Query(inc interface{}, offset, limit int) response.Response {
 		}
 	}
 
+	page := 1
+	if limit > 0 {
+		page = offset/limit + 1
+	}
+
 	return response.Response{
 		Message:  "Query " + d.ColName + " successfully!",
 		Data:     result,
 		Code:     http.StatusOK,
-		Page:     offset/limit + 1,
+		Page:     page,
 		PageSize: limit,
 		Total:    int(total),
 	}
@@ -199,8 +241,15 @@ func (d *DB) Query(inc interface{}, offset, limit int) response.Response {
 // QueryOne get a specific object in DB
 func (d *DB) QueryOne(inc interface{}) response.Response {
 	data := d.NewObject()
-	err := d.db.Collection(d.ColName).FindOne(context.TODO(), inc).Decode(data)
+	col := d.GetCollection()
+	err := col.FindOne(context.TODO(), inc).Decode(data)
 	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return response.Response{
+				Code:    http.StatusNotFound,
+				Message: "Not found any " + d.ColName + ".",
+			}
+		}
 		return response.Response{
 			Code:    http.StatusInternalServerError,
 			Message: "DB error: " + err.Error(),
@@ -215,6 +264,7 @@ func (d *DB) QueryOne(inc interface{}) response.Response {
 
 // Create one object to db
 func (d *DB) Create(inc interface{}) response.Response {
+	col := d.GetCollection()
 	obj, err := d.convertToBson(inc)
 	if err != nil {
 		return response.Response{
@@ -224,14 +274,15 @@ func (d *DB) Create(inc interface{}) response.Response {
 		}
 	}
 
+	now := time.Now()
 	if obj["created_time"] == nil {
-		obj["created_time"] = time.Now()
-		obj["updated_time"] = obj["created_time"]
+		obj["created_time"] = now
+		obj["updated_time"] = now
 	} else {
-		obj["updated_time"] = time.Now()
+		obj["updated_time"] = now
 	}
 
-	_, err = d.db.Collection(d.ColName).InsertOne(context.TODO(), obj)
+	res, err := col.InsertOne(context.TODO(), obj)
 	if err != nil {
 		return response.Response{
 			Message: "DB Error: " + err.Error(),
@@ -240,6 +291,7 @@ func (d *DB) Create(inc interface{}) response.Response {
 		}
 	}
 
+	obj["_id"] = res.InsertedID
 	return response.Response{
 		Message: "Create " + d.ColName + " successfully!",
 		Data:    obj,
@@ -247,15 +299,19 @@ func (d *DB) Create(inc interface{}) response.Response {
 	}
 }
 
-// CreateMany insert many object to DB
+// CreateMany insert many objects to DB
 func (d *DB) CreateMany(incList ...interface{}) response.Response {
+	col := d.GetCollection()
 	objs := []bson.M{}
 	ints := []interface{}{}
 
 	if len(incList) == 1 {
-		incList = incList[0].([]interface{})
+		if list, ok := incList[0].([]interface{}); ok {
+			incList = list
+		}
 	}
 
+	now := time.Now()
 	for _, inc := range incList {
 		obj, err := d.convertToBson(inc)
 		if err != nil {
@@ -267,17 +323,17 @@ func (d *DB) CreateMany(incList ...interface{}) response.Response {
 		}
 
 		if obj["created_time"] == nil {
-			obj["created_time"] = time.Now()
-			obj["updated_time"] = obj["created_time"]
+			obj["created_time"] = now
+			obj["updated_time"] = now
 		} else {
-			obj["updated_time"] = time.Now()
+			obj["updated_time"] = now
 		}
 
 		objs = append(objs, obj)
 		ints = append(ints, obj)
 	}
 
-	_, err := d.db.Collection(d.ColName).InsertMany(context.TODO(), ints)
+	_, err := col.InsertMany(context.TODO(), ints)
 	if err != nil {
 		return response.Response{
 			Message: "DB Error: " + err.Error(),
@@ -293,8 +349,9 @@ func (d *DB) CreateMany(incList ...interface{}) response.Response {
 	}
 }
 
-// UpdateOne all matched item in DB
+// UpdateOne updates all matched fields with $set in DB
 func (d *DB) UpdateOne(filter interface{}, updater interface{}) response.Response {
+	col := d.GetCollection()
 	obj, err := d.convertToBson(updater)
 	if err != nil {
 		return response.Response{
@@ -307,7 +364,7 @@ func (d *DB) UpdateOne(filter interface{}, updater interface{}) response.Respons
 	obj["updated_time"] = time.Now()
 	delete(obj, "_id")
 
-	info, err := d.db.Collection(d.ColName).UpdateOne(context.TODO(), filter, bson.M{
+	info, err := col.UpdateOne(context.TODO(), filter, bson.M{
 		"$set": obj,
 	})
 	if err != nil {
@@ -322,7 +379,7 @@ func (d *DB) UpdateOne(filter interface{}, updater interface{}) response.Respons
 		return response.Response{
 			Message: "Not found any " + d.ColName + ".",
 			Data:    nil,
-			Code:    http.StatusOK,
+			Code:    http.StatusNotFound,
 		}
 	}
 
@@ -333,12 +390,40 @@ func (d *DB) UpdateOne(filter interface{}, updater interface{}) response.Respons
 	}
 }
 
+// UpdateRaw allows custom raw MongoDB update operators like $inc, $set, $push
+func (d *DB) UpdateRaw(filter interface{}, update interface{}) response.Response {
+	col := d.GetCollection()
+	info, err := col.UpdateOne(context.TODO(), filter, update)
+	if err != nil {
+		return response.Response{
+			Message: "DB Error: " + err.Error(),
+			Data:    nil,
+			Code:    http.StatusInternalServerError,
+		}
+	}
+
+	if info.MatchedCount == 0 {
+		return response.Response{
+			Message: "Not found any " + d.ColName + " matching filter.",
+			Data:    nil,
+			Code:    http.StatusNotFound,
+		}
+	}
+
+	return response.Response{
+		Message: "Updated " + d.ColName + " successfully!",
+		Data:    info,
+		Code:    http.StatusOK,
+	}
+}
+
 func (d *DB) DeleteOne(filter interface{}) response.Response {
+	col := d.GetCollection()
 	del := bson.M{
 		"deleted_time": time.Now(),
 	}
 
-	info, err := d.db.Collection(d.ColName).UpdateOne(context.TODO(), filter, bson.M{
+	info, err := col.UpdateOne(context.TODO(), filter, bson.M{
 		"$set": del,
 	})
 	if err != nil {
@@ -353,7 +438,7 @@ func (d *DB) DeleteOne(filter interface{}) response.Response {
 		return response.Response{
 			Message: "Not found any " + d.ColName + ".",
 			Data:    nil,
-			Code:    http.StatusOK,
+			Code:    http.StatusNotFound,
 		}
 	}
 
@@ -363,3 +448,4 @@ func (d *DB) DeleteOne(filter interface{}) response.Response {
 		Code:    http.StatusOK,
 	}
 }
+
