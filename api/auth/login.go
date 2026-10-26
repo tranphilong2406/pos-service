@@ -26,7 +26,8 @@ func Login(c *gin.Context) {
 	}
 
 	filter := bson.M{
-		"name": req.UserName,
+		"name":         req.UserName,
+		"deleted_time": nil,
 	}
 
 	res := models.AuthDB.QueryOne(filter)

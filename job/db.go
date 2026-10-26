@@ -6,7 +6,6 @@ import (
 	"StoreServer/utils/response"
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"reflect"
 	"time"
@@ -34,19 +33,8 @@ func DBConnect() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	monitor := &event.CommandMonitor{
-		Started: func(_ context.Context, e *event.CommandStartedEvent) {
-			log.Printf("Command: %v\n", e.Command)
-		},
-		Succeeded: func(_ context.Context, e *event.CommandSucceededEvent) {
-			log.Printf("Succeeded: %v\n", e.Reply)
-		},
-		Failed: func(_ context.Context, e *event.CommandFailedEvent) {
-			log.Fatalf("Failed: %v\n", e.Failure)
-		},
-	}
 	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
-	opts := options.Client().ApplyURI(cfg.MONGOURL).SetMonitor(monitor).SetServerAPIOptions(serverAPI)
+	opts := options.Client().ApplyURI(cfg.MONGOURL).SetMonitor(newCommandMonitor()).SetServerAPIOptions(serverAPI)
 	conn, err = mongo.Connect(opts)
 	if err != nil {
 		logger.GetLogger().Fatal(err.Error())
@@ -57,6 +45,16 @@ func DBConnect() {
 	}
 
 	fmt.Println("Connected to MongoDB!")
+}
+
+// newCommandMonitor only logs failed commands: payloads may hold password hashes,
+// and a failed command (network blip, bad query) must not stop the server.
+func newCommandMonitor() *event.CommandMonitor {
+	return &event.CommandMonitor{
+		Failed: func(_ context.Context, e *event.CommandFailedEvent) {
+			logger.GetLogger().Error(fmt.Sprintf("Mongo command %s failed: %v", e.CommandName, e.Failure))
+		},
+	}
 }
 
 func Disconnect() {

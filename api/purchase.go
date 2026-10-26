@@ -21,9 +21,8 @@ func CreatePurchase(c *gin.Context) {
 		return
 	}
 
-	if req.Status == "" {
-		req.Status = models.Pending
-	}
+	// New purchases always start pending; stock is only added through ApprovePurchase.
+	req.Status = models.Pending
 
 	if ok := req.Validate(); ok.Code != http.StatusOK {
 		c.JSON(ok.Code, ok)
@@ -150,8 +149,7 @@ func RejectPurchase(c *gin.Context) {
 }
 
 func GetPurchase(c *gin.Context) {
-	page := utils.ParseInt(c.Query("page"), 1)
-	pageSize := utils.ParseInt(c.Query("page_size"), 10)
+	page, pageSize, offset := utils.ParsePagination(c.Query("page"), c.Query("page_size"))
 	timeRange := c.Query("time_range")
 	status := c.Query("status")
 
@@ -171,7 +169,6 @@ func GetPurchase(c *gin.Context) {
 		filter["status"] = models.ConvertPurchaseStatus(status)
 	}
 
-	offset := (page - 1) * pageSize
 	res := models.PurchaseDB.Query(filter, offset, pageSize)
 	if res.Code != http.StatusOK {
 		c.JSON(res.Code, res)
@@ -239,7 +236,7 @@ func UpdatePurchase(c *gin.Context) {
 		"deleted_time": nil,
 	}
 
-	res := models.PurchaseDB.UpdateOne(filter, req)
+	res := models.PurchaseDB.UpdateOne(filter, req.UpdateDoc())
 	c.JSON(res.Code, res)
 }
 

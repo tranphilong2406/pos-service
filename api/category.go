@@ -31,8 +31,7 @@ func CreateCategory(c *gin.Context) {
 }
 
 func GetCategory(c *gin.Context) {
-	page := utils.ParseInt(c.Query("page"), 1)
-	pageSize := utils.ParseInt(c.Query("page_size"), 10)
+	_, pageSize, offset := utils.ParsePagination(c.Query("page"), c.Query("page_size"))
 	name := c.Query("search")
 	filter := bson.M{
 		"deleted_time": nil,
@@ -45,7 +44,6 @@ func GetCategory(c *gin.Context) {
 		}
 	}
 
-	offset := (page - 1) * pageSize
 	res := models.CategoryDB.Query(filter, offset, pageSize)
 	c.JSON(res.Code, res)
 }

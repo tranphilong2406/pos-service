@@ -31,8 +31,7 @@ func CreateProduct(c *gin.Context) {
 }
 
 func GetProduct(c *gin.Context) {
-	page := utils.ParseInt(c.Query("page"), 1)
-	pageSize := utils.ParseInt(c.Query("page_size"), 10)
+	_, pageSize, offset := utils.ParsePagination(c.Query("page"), c.Query("page_size"))
 	categoryID := c.Query("category_id")
 	name := c.Query("search")
 	supplierID := c.Query("supplier_id")
@@ -52,7 +51,6 @@ func GetProduct(c *gin.Context) {
 		filter["name"] = bson.M{"$regex": regexp.QuoteMeta(name), "$options": "i"}
 	}
 
-	offset := (page - 1) * pageSize
 	res := models.ProductDB.Query(filter, offset, pageSize)
 	if res.Code != http.StatusOK {
 		c.JSON(res.Code, res)

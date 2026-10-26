@@ -86,8 +86,7 @@ func rollbackStock(products []models.ProductOrder, indices []int) {
 }
 
 func GetOrder(c *gin.Context) {
-	page := utils.ParseInt(c.Query("page"), 1)
-	pageSize := utils.ParseInt(c.Query("page_size"), 10)
+	page, pageSize, offset := utils.ParsePagination(c.Query("page"), c.Query("page_size"))
 	status := c.Query("status")
 	timeRange := c.Query("time_range")
 
@@ -107,7 +106,6 @@ func GetOrder(c *gin.Context) {
 		filter["status"] = utils.ParseBool(status)
 	}
 
-	offset := (page - 1) * pageSize
 	res := models.OrderDB.Query(filter, offset, pageSize)
 	if res.Code != http.StatusOK {
 		c.JSON(res.Code, res)
