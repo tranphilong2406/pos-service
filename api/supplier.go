@@ -31,8 +31,7 @@ func CreateSupplier(c *gin.Context) {
 }
 
 func GetSupplier(c *gin.Context) {
-	page := utils.ParseInt(c.Query("page"), 1)
-	pageSize := utils.ParseInt(c.Query("page_size"), 10)
+	_, pageSize, offset := utils.ParsePagination(c.Query("page"), c.Query("page_size"))
 	name := c.Query("search")
 	filter := bson.M{
 		"deleted_time": nil,
@@ -41,7 +40,6 @@ func GetSupplier(c *gin.Context) {
 	if name != "" {
 		filter["name"] = bson.M{"$regex": regexp.QuoteMeta(name), "$options": "i"}
 	}
-	offset := (page - 1) * pageSize
 	res := models.SupplierDB.Query(filter, offset, pageSize)
 	if res.Code != http.StatusOK {
 		c.JSON(res.Code, res)

@@ -3,6 +3,7 @@ package models
 import (
 	"StoreServer/job"
 	"StoreServer/utils/response"
+	"encoding/json"
 	"net/http"
 	"time"
 
@@ -47,6 +48,16 @@ type User struct {
 	CreatedTime *time.Time    `json:"created_time" bson:"created_time"`
 	UpdatedTime *time.Time    `json:"updated_time" bson:"updated_time"`
 	DeletedTime *time.Time    `json:"deleted_time" bson:"deleted_time,omitempty"`
+}
+
+// MarshalJSON drops the password hash from every JSON response. Decoding is
+// unaffected, so request bodies can still carry a password.
+func (u User) MarshalJSON() ([]byte, error) {
+	type alias User
+	return json.Marshal(struct {
+		alias
+		Password string `json:"password,omitempty"`
+	}{alias: alias(u)})
 }
 
 func (u *User) Validate() response.Response {

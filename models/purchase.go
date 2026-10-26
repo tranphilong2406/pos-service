@@ -65,8 +65,30 @@ func (r Purchase) Validate() response.Response {
 		res.Message = "Price must be greater than 0"
 		return res
 	}
+	for _, p := range r.Products {
+		if p.ID.IsZero() {
+			res.Code = http.StatusBadRequest
+			res.Message = "Product ID is required"
+			return res
+		}
+		if p.Quantity <= 0 {
+			res.Code = http.StatusBadRequest
+			res.Message = "Quantity must be greater than 0"
+			return res
+		}
+	}
 
 	return res
+}
+
+// UpdateDoc returns the fields a client may edit. Status only changes through
+// approve/reject, and server-managed times are left untouched.
+func (r Purchase) UpdateDoc() bson.M {
+	return bson.M{
+		"supplier_id": r.SupplierID,
+		"products":    r.Products,
+		"total_price": r.TotalPrice,
+	}
 }
 
 func InitPurchaseDB() {

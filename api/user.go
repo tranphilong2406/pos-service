@@ -42,17 +42,19 @@ func CreateUser(c *gin.Context) {
 	req.Password = string(passHash)
 
 	res := models.AuthDB.Create(req)
+	// Create echoes the inserted bson.M, which bypasses User.MarshalJSON.
+	if doc, ok := res.Data.(bson.M); ok {
+		delete(doc, "password")
+	}
 	c.JSON(res.Code, res)
 }
 
 func GetUser(c *gin.Context) {
-	page := utils.ParseInt(c.Query("page"), 1)
-	pageSize := utils.ParseInt(c.Query("page_size"), 10)
+	_, pageSize, offset := utils.ParsePagination(c.Query("page"), c.Query("page_size"))
 	filter := bson.M{
 		"deleted_time": nil,
 	}
 
-	offset := (page - 1) * pageSize
 	res := models.AuthDB.Query(filter, offset, pageSize)
 	if res.Code != http.StatusOK {
 		c.JSON(res.Code, res)
