@@ -189,7 +189,22 @@ func DeleteOrder(c *gin.Context) {
 		"deleted_time": nil,
 	}
 
+	found := models.OrderDB.QueryOne(filter)
+	if found.Code != http.StatusOK {
+		c.JSON(found.Code, found)
+		return
+	}
+	order := found.Data.(*models.Order)
+
+	// DeleteOne only matches a not-yet-deleted order, so concurrent deletes return the stock once.
 	res := models.OrderDB.DeleteOne(filter)
+	if res.Code == http.StatusOK {
+		all := make([]int, len(order.Products))
+		for i := range all {
+			all[i] = i
+		}
+		rollbackStock(order.Products, all)
+	}
 	c.JSON(res.Code, res)
 }
 

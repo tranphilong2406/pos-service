@@ -26,6 +26,11 @@ func CreateProduct(c *gin.Context) {
 		return
 	}
 
+	if !checkRef(c, &models.CategoryDB, "category_id", req.CategoryID) ||
+		!checkRef(c, &models.SupplierDB, "supplier_id", req.SupplierID) {
+		return
+	}
+
 	res := models.ProductDB.Create(req)
 	c.JSON(res.Code, res)
 }
@@ -85,6 +90,24 @@ func UpdateProduct(c *gin.Context) {
 		return
 	}
 
+	filter := bson.M{
+		"_id":          objID,
+		"deleted_time": nil,
+	}
+
+	current := models.ProductDB.QueryOne(filter)
+	if current.Code != http.StatusOK {
+		c.JSON(current.Code, current)
+		return
+	}
+	product := current.Data.(*models.Product)
+
+	// Only check references that change: a product must stay editable after its category or supplier was deleted.
+	if (req.CategoryID != product.CategoryID && !checkRef(c, &models.CategoryDB, "category_id", req.CategoryID)) ||
+		(req.SupplierID != product.SupplierID && !checkRef(c, &models.SupplierDB, "supplier_id", req.SupplierID)) {
+		return
+	}
+
 	updateDoc := bson.M{
 		"name":         req.Name,
 		"description":  req.Description,
@@ -101,11 +124,6 @@ func UpdateProduct(c *gin.Context) {
 	}
 	if req.Image != "" {
 		updateDoc["image"] = req.Image
-	}
-
-	filter := bson.M{
-		"_id":          objID,
-		"deleted_time": nil,
 	}
 
 	updating := models.ProductDB.UpdateRaw(filter, bson.M{"$set": updateDoc})

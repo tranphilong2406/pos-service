@@ -30,9 +30,16 @@ func Login(c *gin.Context) {
 		"deleted_time": nil,
 	}
 
+	// Unknown user and wrong password get the same answer so usernames cannot be enumerated.
+	invalidLogin := myerror.AnyError(http.StatusUnauthorized, errors.New("invalid username or password"))
+
 	res := models.AuthDB.QueryOne(filter)
+	if res.Code == http.StatusNotFound {
+		response.MyResponse.Error(c, invalidLogin)
+		return
+	}
 	if res.Code != http.StatusOK {
-		response.MyResponse.Error(c, myerror.AnyError(res.Code, errors.New("user not found")))
+		c.JSON(res.Code, res)
 		return
 	}
 
@@ -40,7 +47,7 @@ func Login(c *gin.Context) {
 
 	err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password))
 	if err != nil {
-		response.MyResponse.Error(c, myerror.AnyError(http.StatusUnauthorized, errors.New("password does not match")))
+		response.MyResponse.Error(c, invalidLogin)
 		return
 	}
 
