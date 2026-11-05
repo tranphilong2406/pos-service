@@ -9,6 +9,9 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
+// validMethods only accepts tokens signed the way GenerateToken signs them.
+var validMethods = jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()})
+
 type Claims struct {
 	UserID   bson.ObjectID `json:"user_id"`
 	Username string        `json:"username"`
@@ -57,7 +60,7 @@ func ValidateToken(tokenString string) (bool, error) {
 
 	_, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
 		return []byte(secret), nil
-	})
+	}, validMethods)
 
 	if err != nil {
 		return false, err
@@ -75,7 +78,7 @@ func ParseToken(tokenString string) (*Claims, error) {
 
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
 		return []byte(secret), nil
-	})
+	}, validMethods)
 
 	if err != nil {
 		return nil, err

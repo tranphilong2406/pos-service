@@ -8,8 +8,13 @@ import (
 	"StoreServer/middleware"
 	"StoreServer/models"
 	"StoreServer/utils/logger"
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -18,6 +23,9 @@ import (
 
 func SetupServer() {
 	con := config.GetConfig()
+	for _, warning := range con.Warnings() {
+		logger.GetLogger().Warn(warning)
+	}
 	errs := make(chan error, 1)
 
 	//connecting to db
@@ -26,7 +34,6 @@ func SetupServer() {
 	defer job.Disconnect()
 	// init collection
 	println("Init collection...")
-	models.InitExampleDB()
 	models.InitProductDB()
 	models.InitCategoryDB()
 	models.InitOrderDB()
@@ -35,32 +42,41 @@ func SetupServer() {
 	models.InitSupplierDB()
 	println("Init collection done!")
 
-	s := SetHandler()
-	{
-		go func() {
-			server := &http.Server{
-				Addr:              ":" + con.ServerPort,
-				Handler:           s,
-				WriteTimeout:      time.Second * 30,
-				IdleTimeout:       time.Second * 30,
-				ReadHeaderTimeout: time.Minute,
-			}
-			logger.GetLogger().Info("Server running on port: " + server.Addr)
-
-			errs <- server.ListenAndServe()
-		}()
+	server := &http.Server{
+		Addr:              ":" + con.ServerPort,
+		Handler:           SetHandler(),
+		WriteTimeout:      time.Second * 30,
+		IdleTimeout:       time.Second * 30,
+		ReadHeaderTimeout: time.Minute,
 	}
+	go func() {
+		logger.GetLogger().Info("Server running on port: " + server.Addr)
+		errs <- server.ListenAndServe()
+	}()
 
-	err := <-errs
-	if err != nil {
-		logger.GetLogger().Error(err.Error())
+	// Stop on SIGINT/SIGTERM: finish in-flight requests (e.g. an order's stock updates), then disconnect from MongoDB.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	select {
+	case err := <-errs:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.GetLogger().Error(err.Error())
+		}
+	case <-ctx.Done():
+		logger.GetLogger().Info("Shutting down server...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			logger.GetLogger().Error(err.Error())
+		}
 	}
 }
 
 func SetHandler() *gin.Engine {
-	r := gin.Default()
-	r.Use(gin.Recovery())
-	r.Use(gin.Logger())
+	// gin.New, not gin.Default: Default already adds Logger and Recovery, which logged every request twice.
+	r := gin.New()
+	r.Use(gin.Logger(), gin.Recovery())
 
 	r.Use(cors.New(cors.Config{
 		AllowOrigins: []string{"*"},
@@ -87,15 +103,9 @@ func SetHandler() *gin.Engine {
 		authRoute.POST("/login", auth.Login)
 	}
 
-	// Example routes
 	apiRoute := r.Group("/api")
 	apiRoute.Use(middleware.CheckLogin())
 	{
-		apiRoute.POST("/example/", api.CreateExample)
-		apiRoute.GET("/examples/", api.GetExample)
-		apiRoute.POST("/examples/", api.CreateListExample)
-		apiRoute.PUT("/examples/", api.UpdateExample)
-		apiRoute.DELETE("/examples/:id", api.DeleteExample)
 		// Product routes
 		apiRoute.GET("/products/", api.GetProduct)
 		apiRoute.POST("/products/", middleware.CheckRole("admin", "manager"), api.CreateProduct)

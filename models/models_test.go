@@ -148,6 +148,41 @@ func TestUserJSONStillAcceptsPassword(t *testing.T) {
 	}
 }
 
+// userWithRole decodes a user the way a request body is bound.
+func userWithRole(t *testing.T, role string) models.User {
+	t.Helper()
+	var u models.User
+	if err := json.Unmarshal([]byte(`{"name":"someone","role":"`+role+`"}`), &u); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	return u
+}
+
+func TestUserValidationRejectsUnknownRole(t *testing.T) {
+	for _, role := range []string{"superadmin", "Admin", "owner"} {
+		u := userWithRole(t, role)
+		if res := u.Validate(); res.Code != http.StatusBadRequest {
+			t.Errorf("Expected role %q to return 400, got %d", role, res.Code)
+		}
+	}
+}
+
+func TestUserValidationAcceptsKnownRoles(t *testing.T) {
+	for _, role := range []string{"admin", "manager", "cashier"} {
+		u := userWithRole(t, role)
+		if res := u.Validate(); res.Code != http.StatusOK {
+			t.Errorf("Expected role %q to be valid, got %d: %s", role, res.Code, res.Message)
+		}
+	}
+}
+
+func TestUserValidationDefaultsEmptyRoleToCashier(t *testing.T) {
+	u := userWithRole(t, "")
+	if res := u.Validate(); res.Code != http.StatusOK || u.Role != models.CashierRole {
+		t.Errorf("Expected empty role to default to cashier, got %d role %q", res.Code, u.Role)
+	}
+}
+
 func TestUserValidation(t *testing.T) {
 	validUser := models.User{
 		UserName: "admin",

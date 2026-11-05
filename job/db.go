@@ -26,6 +26,10 @@ type DB struct {
 
 var conn *mongo.Client
 
+// serverSelectionTimeout must stay below the HTTP server's WriteTimeout, otherwise clients get
+// no response while MongoDB is down. 10s still rides out a normal replica set election.
+const serverSelectionTimeout = 10 * time.Second
+
 func DBConnect() {
 	cfg := config.GetConfig()
 	var err error
@@ -33,9 +37,7 @@ func DBConnect() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
-	opts := options.Client().ApplyURI(cfg.MONGOURL).SetMonitor(newCommandMonitor()).SetServerAPIOptions(serverAPI)
-	conn, err = mongo.Connect(opts)
+	conn, err = mongo.Connect(newClientOptions(cfg.MONGOURL))
 	if err != nil {
 		logger.GetLogger().Fatal(err.Error())
 	}
@@ -45,6 +47,12 @@ func DBConnect() {
 	}
 
 	fmt.Println("Connected to MongoDB!")
+}
+
+func newClientOptions(uri string) *options.ClientOptions {
+	serverAPI := options.ServerAPI(options.ServerAPIVersion1)
+	return options.Client().ApplyURI(uri).SetMonitor(newCommandMonitor()).SetServerAPIOptions(serverAPI).
+		SetServerSelectionTimeout(serverSelectionTimeout)
 }
 
 // newCommandMonitor only logs failed commands: payloads may hold password hashes,
@@ -103,24 +111,14 @@ func (d *DB) convertToBson(inc interface{}) (bson.M, error) {
 	return res, nil
 }
 
-func (d *DB) convertToObj(inc bson.M) (interface{}, error) {
-	var obj interface{}
-
-	if inc == nil {
-		return obj, nil
+// dbError logs err and returns a response without database internals. Duplicate keys
+// are a client problem (409); anything else is reported as a generic 500.
+func (d *DB) dbError(err error) response.Response {
+	if mongo.IsDuplicateKeyError(err) {
+		return response.Response{Code: http.StatusConflict, Message: d.ColName + " already exists"}
 	}
-
-	bytes, err := bson.Marshal(inc)
-	if err != nil {
-		return nil, err
-	}
-
-	ok := bson.Unmarshal(bytes, obj)
-	if ok != nil {
-		return nil, ok
-	}
-
-	return obj, nil
+	logger.GetLogger().Error(fmt.Sprintf("%s: %v", d.ColName, err))
+	return response.Response{Code: http.StatusInternalServerError, Message: "Internal server error"}
 }
 
 func (d *DB) Init(dbname string) {
@@ -167,12 +165,7 @@ func (d *DB) Count(filter interface{}) response.Response {
 	col := d.GetCollection()
 	count, err := col.CountDocuments(context.Background(), filter)
 	if err != nil {
-		return response.Response{
-			Message: err.Error(),
-			Data:    nil,
-			Code:    http.StatusInternalServerError,
-			Total:   int(count),
-		}
+		return d.dbError(err)
 	}
 
 	return response.Response{
@@ -193,20 +186,12 @@ func (d *DB) Query(inc interface{}, offset, limit int) response.Response {
 
 	total, err := col.CountDocuments(context.TODO(), inc)
 	if err != nil {
-		return response.Response{
-			Message: "Count Error: " + err.Error(),
-			Data:    nil,
-			Code:    http.StatusInternalServerError,
-		}
+		return d.dbError(err)
 	}
 
 	cursor, err := col.Find(context.TODO(), inc, findOptions)
 	if err != nil {
-		return response.Response{
-			Message: "DB Error: " + err.Error(),
-			Data:    nil,
-			Code:    http.StatusInternalServerError,
-		}
+		return d.dbError(err)
 	}
 
 	defer cursor.Close(context.TODO())
@@ -214,11 +199,7 @@ func (d *DB) Query(inc interface{}, offset, limit int) response.Response {
 	var result = d.NewList(limit)
 	err = cursor.All(context.TODO(), &result)
 	if err != nil {
-		return response.Response{
-			Message: "Not found any " + d.ColName + ".",
-			Data:    nil,
-			Code:    http.StatusNotFound,
-		}
+		return d.dbError(err)
 	}
 
 	page := 1
@@ -248,10 +229,7 @@ func (d *DB) QueryOne(inc interface{}) response.Response {
 				Message: "Not found any " + d.ColName + ".",
 			}
 		}
-		return response.Response{
-			Code:    http.StatusInternalServerError,
-			Message: "DB error: " + err.Error(),
-		}
+		return d.dbError(err)
 	}
 	return response.Response{
 		Message: "Query " + d.ColName + " successfully!",
@@ -265,11 +243,7 @@ func (d *DB) Create(inc interface{}) response.Response {
 	col := d.GetCollection()
 	obj, err := d.convertToBson(inc)
 	if err != nil {
-		return response.Response{
-			Message: "Convert Error: " + err.Error(),
-			Data:    nil,
-			Code:    http.StatusInternalServerError,
-		}
+		return d.dbError(err)
 	}
 
 	now := time.Now()
@@ -282,11 +256,7 @@ func (d *DB) Create(inc interface{}) response.Response {
 
 	res, err := col.InsertOne(context.TODO(), obj)
 	if err != nil {
-		return response.Response{
-			Message: "DB Error: " + err.Error(),
-			Data:    nil,
-			Code:    http.StatusInternalServerError,
-		}
+		return d.dbError(err)
 	}
 
 	obj["_id"] = res.InsertedID
@@ -313,11 +283,7 @@ func (d *DB) CreateMany(incList ...interface{}) response.Response {
 	for _, inc := range incList {
 		obj, err := d.convertToBson(inc)
 		if err != nil {
-			return response.Response{
-				Message: "Convert Error: " + err.Error(),
-				Data:    nil,
-				Code:    http.StatusInternalServerError,
-			}
+			return d.dbError(err)
 		}
 
 		if obj["created_time"] == nil {
@@ -333,11 +299,7 @@ func (d *DB) CreateMany(incList ...interface{}) response.Response {
 
 	_, err := col.InsertMany(context.TODO(), ints)
 	if err != nil {
-		return response.Response{
-			Message: "DB Error: " + err.Error(),
-			Data:    nil,
-			Code:    http.StatusInternalServerError,
-		}
+		return d.dbError(err)
 	}
 
 	return response.Response{
@@ -352,11 +314,7 @@ func (d *DB) UpdateOne(filter interface{}, updater interface{}) response.Respons
 	col := d.GetCollection()
 	obj, err := d.convertToBson(updater)
 	if err != nil {
-		return response.Response{
-			Message: "Convert Error: " + err.Error(),
-			Data:    nil,
-			Code:    http.StatusInternalServerError,
-		}
+		return d.dbError(err)
 	}
 
 	obj["updated_time"] = time.Now()
@@ -366,11 +324,7 @@ func (d *DB) UpdateOne(filter interface{}, updater interface{}) response.Respons
 		"$set": obj,
 	})
 	if err != nil {
-		return response.Response{
-			Message: "DB Error: " + err.Error(),
-			Data:    nil,
-			Code:    http.StatusInternalServerError,
-		}
+		return d.dbError(err)
 	}
 
 	if info.MatchedCount == 0 {
@@ -393,11 +347,7 @@ func (d *DB) UpdateRaw(filter interface{}, update interface{}) response.Response
 	col := d.GetCollection()
 	info, err := col.UpdateOne(context.TODO(), filter, update)
 	if err != nil {
-		return response.Response{
-			Message: "DB Error: " + err.Error(),
-			Data:    nil,
-			Code:    http.StatusInternalServerError,
-		}
+		return d.dbError(err)
 	}
 
 	if info.MatchedCount == 0 {
@@ -425,11 +375,7 @@ func (d *DB) DeleteOne(filter interface{}) response.Response {
 		"$set": del,
 	})
 	if err != nil {
-		return response.Response{
-			Message: "DB Error: " + err.Error(),
-			Data:    nil,
-			Code:    http.StatusInternalServerError,
-		}
+		return d.dbError(err)
 	}
 
 	if info.MatchedCount == 0 {

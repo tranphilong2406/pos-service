@@ -21,23 +21,15 @@ func Respond(c *gin.Context, response *Response) {
 	c.JSON(response.Code, response)
 }
 
+// Success, Created and Error all write Response so every endpoint returns the same JSON shape.
 func (Response) Success(c *gin.Context, data interface{}) {
-	c.JSON(http.StatusOK, map[string]interface{}{
-		"message": "ok",
-		"data":    data,
-	})
+	c.JSON(http.StatusOK, Response{Code: http.StatusOK, Message: "ok", Data: data})
 }
 
 func (Response) Created(c *gin.Context, data interface{}) {
-	c.JSON(http.StatusCreated, map[string]interface{}{
-		"message": "ok",
-		"data":    data,
-	})
+	c.JSON(http.StatusCreated, Response{Code: http.StatusCreated, Message: "ok", Data: data})
 }
 
 func (Response) Error(c *gin.Context, err myerr.CustomError) {
-	c.JSON(err.HTTPCode, gin.H{
-		"code":    err.HTTPCode,
-		"message": err.Error(),
-	})
+	c.JSON(err.HTTPCode, Response{Code: err.HTTPCode, Message: err.Error()})
 }

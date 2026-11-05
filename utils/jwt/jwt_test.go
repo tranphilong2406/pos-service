@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	gojwt "github.com/golang-jwt/jwt/v5"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -44,6 +45,22 @@ func TestGenerateAndParseToken(t *testing.T) {
 	valid, err := jwt.ValidateToken(token)
 	if err != nil || !valid {
 		t.Errorf("Expected token to be valid, got valid=%v, err=%v", valid, err)
+	}
+}
+
+func TestParseTokenRejectsOtherHMACAlgorithms(t *testing.T) {
+	cfg := config.GetConfig()
+	cfg.JWTSecret = "test_secret_key_12345"
+
+	claims := jwt.Claims{UserID: bson.NewObjectID(), Username: "testuser", Role: "admin"}
+	claims.ExpiresAt = gojwt.NewNumericDate(time.Now().Add(time.Hour))
+	token, err := gojwt.NewWithClaims(gojwt.SigningMethodHS512, claims).SignedString([]byte(cfg.JWTSecret))
+	if err != nil {
+		t.Fatalf("Failed to sign HS512 token: %v", err)
+	}
+
+	if _, err := jwt.ParseToken(token); err == nil {
+		t.Error("Expected HS512 token to be rejected")
 	}
 }
 

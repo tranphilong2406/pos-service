@@ -72,8 +72,14 @@ func (u *User) Validate() response.Response {
 		res.Message = "User name is required"
 		return res
 	}
-	if u.Role == "" {
+	switch u.Role {
+	case "":
 		u.Role = CashierRole
+	case AdminRole, ManagerRole, CashierRole:
+	default:
+		res.Code = http.StatusBadRequest
+		res.Message = "Role must be one of admin, manager, cashier"
+		return res
 	}
 
 	return res

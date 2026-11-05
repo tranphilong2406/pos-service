@@ -2,6 +2,7 @@ package config
 
 import (
 	"StoreServer/utils/logger"
+	"fmt"
 	"sync"
 
 	"github.com/joho/godotenv"
@@ -20,8 +21,20 @@ type Config struct {
 	JWTExpiryHours int    `envconfig:"JWT_EXPIRY_HOURS" default:"24"`
 }
 
+// minJWTSecretLength is the shortest HS256 secret that is not practical to brute-force offline.
+const minJWTSecretLength = 32
+
 func init() {
 	GetConfig()
+}
+
+// Warnings lists settings that work but are unsafe for production.
+func (c *Config) Warnings() []string {
+	var warnings []string
+	if len(c.JWTSecret) < minJWTSecretLength {
+		warnings = append(warnings, fmt.Sprintf("JWT_SECRET is shorter than %d characters; use a long random value (e.g. openssl rand -base64 48)", minJWTSecretLength))
+	}
+	return warnings
 }
 
 func GetConfig() *Config {

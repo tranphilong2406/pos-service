@@ -9,7 +9,11 @@ import (
 var logger *zap.Logger
 
 func init() {
-	cfg := zap.Config{
+	logger, _ = newConfig().Build()
+}
+
+func newConfig() zap.Config {
+	return zap.Config{
 		Level:       zap.NewAtomicLevelAt(zap.InfoLevel),
 		Development: false,
 		Encoding:    "json",
@@ -19,15 +23,13 @@ func init() {
 			TimeKey:      "time",
 			NameKey:      "name",
 			CallerKey:    "caller",
-			LineEnding:   "!\n",
+			LineEnding:   "\n",
 			EncodeLevel:  zapcore.CapitalLevelEncoder,
 			EncodeTime:   zapcore.TimeEncoderOfLayout(time.RFC3339),
 			EncodeCaller: zapcore.FullCallerEncoder,
 		},
 		OutputPaths: []string{"stderr"},
 	}
-
-	logger, _ = cfg.Build()
 }
 
 func GetLogger() *zap.Logger {

@@ -5,8 +5,11 @@ import (
 	"StoreServer/utils"
 	myerror "StoreServer/utils/error"
 	gettime "StoreServer/utils/get_time"
+	"StoreServer/utils/logger"
 	"StoreServer/utils/response"
+	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -26,6 +29,10 @@ func CreatePurchase(c *gin.Context) {
 
 	if ok := req.Validate(); ok.Code != http.StatusOK {
 		c.JSON(ok.Code, ok)
+		return
+	}
+
+	if !checkRef(c, &models.SupplierDB, "supplier_id", req.SupplierID) || !checkProducts(c, req.Products) {
 		return
 	}
 
@@ -66,6 +73,11 @@ func ApprovePurchase(c *gin.Context) {
 		return
 	}
 
+	// A product may have been deleted since the purchase was created.
+	if !checkProducts(c, purchaseData.Products) {
+		return
+	}
+
 	// Update purchase status to approved first with conditional match
 	statusFilter := bson.M{
 		"_id":    objID,
@@ -87,6 +99,7 @@ func ApprovePurchase(c *gin.Context) {
 	}
 
 	// Atomically increase stock for each product
+	var failed []string
 	for _, prodItem := range purchaseData.Products {
 		prodFilter := bson.M{
 			"_id": prodItem.ID,
@@ -97,9 +110,20 @@ func ApprovePurchase(c *gin.Context) {
 				"updated_time": time.Now(),
 			},
 		}
-		_ = models.ProductDB.UpdateRaw(prodFilter, prodUpdate)
+		if res := models.ProductDB.UpdateRaw(prodFilter, prodUpdate); res.Code != http.StatusOK {
+			failed = append(failed, prodItem.ID.Hex())
+		}
 	}
 
+	if len(failed) > 0 {
+		// The purchase is already approved; report it instead of pretending the stock was added.
+		logger.GetLogger().Error(fmt.Sprintf("purchase %s approved but stock not added for products %v", objID.Hex(), failed))
+		c.JSON(http.StatusInternalServerError, response.Response{
+			Code:    http.StatusInternalServerError,
+			Message: "Purchase approved but stock could not be added for products: " + strings.Join(failed, ", "),
+		})
+		return
+	}
 
 	c.JSON(http.StatusOK, response.Response{
 		Code:    http.StatusOK,
@@ -230,6 +254,24 @@ func UpdatePurchase(c *gin.Context) {
 		return
 	}
 
+	current := models.PurchaseDB.QueryOne(bson.M{"_id": objID, "deleted_time": nil})
+	if current.Code != http.StatusOK {
+		c.JSON(current.Code, current)
+		return
+	}
+	if current.Data.(*models.Purchase).Status != models.Pending {
+		c.JSON(http.StatusBadRequest, response.Response{
+			Code:    http.StatusBadRequest,
+			Message: "Only purchases in pending status can be edited",
+		})
+		return
+	}
+
+	if !checkRef(c, &models.SupplierDB, "supplier_id", req.SupplierID) || !checkProducts(c, req.Products) {
+		return
+	}
+
+	// Keep the status in the filter: the purchase may be approved between the check above and this update.
 	filter := bson.M{
 		"_id":          objID,
 		"status":       models.Pending,
