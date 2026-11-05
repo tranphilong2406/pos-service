@@ -12,6 +12,34 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
+func TestStampNewIgnoresClientTimes(t *testing.T) {
+	type record struct {
+		CreatedTime *time.Time `bson:"created_time"`
+		UpdatedTime *time.Time `bson:"updated_time"`
+		DeletedTime *time.Time `bson:"deleted_time,omitempty"`
+	}
+	client := time.Date(2020, 1, 15, 0, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+
+	d := DB{}
+	obj, err := d.convertToBson(record{CreatedTime: &client, UpdatedTime: &client, DeletedTime: &client})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stampNew(obj, now)
+
+	if obj["created_time"] != now {
+		t.Errorf("created_time must be the server time, got %v", obj["created_time"])
+	}
+	if obj["updated_time"] != now {
+		t.Errorf("updated_time must be the server time, got %v", obj["updated_time"])
+	}
+	if _, ok := obj["deleted_time"]; ok {
+		t.Errorf("a new record must not be deleted, got deleted_time %v", obj["deleted_time"])
+	}
+}
+
 func TestClientOptionsFailBeforeHTTPWriteTimeout(t *testing.T) {
 	// The HTTP server's WriteTimeout is 30s: selection must give up earlier for the 500 to reach the client.
 	got := newClientOptions("mongodb://127.0.0.1:27017/").ServerSelectionTimeout

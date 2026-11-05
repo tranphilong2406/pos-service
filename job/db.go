@@ -238,6 +238,15 @@ func (d *DB) QueryOne(inc interface{}) response.Response {
 	}
 }
 
+// stampNew sets the server-managed times on a new document. Values sent by a client are
+// ignored: created_time would move a record out of its reporting period, deleted_time would
+// hide it from every list.
+func stampNew(obj bson.M, now time.Time) {
+	obj["created_time"] = now
+	obj["updated_time"] = now
+	delete(obj, "deleted_time")
+}
+
 // Create one object to db
 func (d *DB) Create(inc interface{}) response.Response {
 	col := d.GetCollection()
@@ -246,13 +255,7 @@ func (d *DB) Create(inc interface{}) response.Response {
 		return d.dbError(err)
 	}
 
-	now := time.Now()
-	if obj["created_time"] == nil {
-		obj["created_time"] = now
-		obj["updated_time"] = now
-	} else {
-		obj["updated_time"] = now
-	}
+	stampNew(obj, time.Now())
 
 	res, err := col.InsertOne(context.TODO(), obj)
 	if err != nil {
@@ -286,12 +289,7 @@ func (d *DB) CreateMany(incList ...interface{}) response.Response {
 			return d.dbError(err)
 		}
 
-		if obj["created_time"] == nil {
-			obj["created_time"] = now
-			obj["updated_time"] = now
-		} else {
-			obj["updated_time"] = now
-		}
+		stampNew(obj, now)
 
 		objs = append(objs, obj)
 		ints = append(ints, obj)
