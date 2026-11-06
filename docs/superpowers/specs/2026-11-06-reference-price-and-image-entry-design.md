@@ -1,6 +1,6 @@
 # Giá tham khảo và nhập sản phẩm bằng ảnh
 
-Ngày: 2026-11-06. Trạng thái: chờ duyệt.
+Ngày: 2026-11-06. Trạng thái: đã duyệt.
 
 Phạm vi gồm hai repo: `StationeryStore` (API Go) và `pos-system` (React).
 
