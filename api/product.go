@@ -108,13 +108,20 @@ func UpdateProduct(c *gin.Context) {
 		return
 	}
 
-	updateDoc := bson.M{
-		"name":         req.Name,
-		"description":  req.Description,
-		"stock":        req.Stock,
-		"updated_time": time.Now(),
-	}
+	updating := models.ProductDB.UpdateRaw(filter, bson.M{"$set": productUpdateDoc(req)})
+	c.JSON(updating.Code, updating)
+}
 
+// productUpdateDoc returns the fields a PUT sets. Empty category, supplier and image keep
+// the stored value; reference prices are always replaced so a client can clear them.
+func productUpdateDoc(req models.Product) bson.M {
+	updateDoc := bson.M{
+		"name":             req.Name,
+		"description":      req.Description,
+		"stock":            req.Stock,
+		"reference_prices": req.ReferencePrices,
+		"updated_time":     time.Now(),
+	}
 
 	if req.CategoryID != "" {
 		updateDoc["category_id"] = req.CategoryID
@@ -126,8 +133,7 @@ func UpdateProduct(c *gin.Context) {
 		updateDoc["image"] = req.Image
 	}
 
-	updating := models.ProductDB.UpdateRaw(filter, bson.M{"$set": updateDoc})
-	c.JSON(updating.Code, updating)
+	return updateDoc
 }
 
 func DeleteProduct(c *gin.Context) {

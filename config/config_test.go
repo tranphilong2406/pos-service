@@ -7,15 +7,22 @@ import (
 )
 
 func TestWarningsFlagShortJWTSecret(t *testing.T) {
-	cfg := config.Config{JWTSecret: "only-19-characters!"}
+	cfg := config.Config{JWTSecret: "only-19-characters!", AnthropicAPIKey: "k"}
 	if w := cfg.Warnings(); len(w) != 1 || !strings.Contains(w[0], "JWT_SECRET") {
 		t.Errorf("Expected one JWT_SECRET warning, got %v", w)
 	}
 }
 
 func TestWarningsAcceptLongJWTSecret(t *testing.T) {
-	cfg := config.Config{JWTSecret: strings.Repeat("x", 32)}
+	cfg := config.Config{JWTSecret: strings.Repeat("x", 32), AnthropicAPIKey: "k"}
 	if w := cfg.Warnings(); len(w) != 0 {
 		t.Errorf("Expected no warnings, got %v", w)
+	}
+}
+
+func TestWarningsFlagMissingAnthropicKey(t *testing.T) {
+	cfg := config.Config{JWTSecret: strings.Repeat("x", 32)}
+	if w := cfg.Warnings(); len(w) != 1 || !strings.Contains(w[0], "ANTHROPIC_API_KEY") {
+		t.Errorf("Expected one ANTHROPIC_API_KEY warning, got %v", w)
 	}
 }
