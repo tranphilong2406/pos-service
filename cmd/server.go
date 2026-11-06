@@ -7,6 +7,7 @@ import (
 	"StoreServer/job"
 	"StoreServer/middleware"
 	"StoreServer/models"
+	"StoreServer/utils/claude"
 	"StoreServer/utils/logger"
 	"context"
 	"errors"
@@ -73,6 +74,14 @@ func SetupServer() {
 	}
 }
 
+// newProductAnalyzer returns a nil interface without an API key, which turns the route off.
+func newProductAnalyzer(cfg *config.Config) api.ProductAnalyzer {
+	if cfg.AnthropicAPIKey == "" {
+		return nil
+	}
+	return claude.New(cfg.AnthropicAPIKey, cfg.ClaudeModel)
+}
+
 func SetHandler() *gin.Engine {
 	// gin.New, not gin.Default: Default already adds Logger and Recovery, which logged every request twice.
 	r := gin.New()
@@ -111,6 +120,7 @@ func SetHandler() *gin.Engine {
 		apiRoute.POST("/products/", middleware.CheckRole("admin", "manager"), api.CreateProduct)
 		apiRoute.PUT("/products/:id", middleware.CheckRole("admin", "manager"), api.UpdateProduct)
 		apiRoute.DELETE("/products/:id", middleware.CheckRole("admin", "manager"), api.DeleteProduct)
+		apiRoute.POST("/products/analyze-image", middleware.CheckRole("admin", "manager"), api.AnalyzeProductImage(newProductAnalyzer(config.GetConfig()), api.ListActiveCategories))
 		// Category routes
 		apiRoute.GET("/categories/", api.GetCategory)
 		apiRoute.POST("/categories/", middleware.CheckRole("admin", "manager"), api.CreateCategory)
