@@ -6,6 +6,8 @@ API server
 
 ## Installation
 
+Requires Go 1.25 or newer.
+
 Install all modules
 
 ```bash
@@ -16,6 +18,8 @@ Install air:
     go install github.com/air-verse/air@latest
 ```
 Configure: copy `.env.example` to `.env` and fill in `MONGO_URL` and `JWT_SECRET`.
+
+Set `ANTHROPIC_API_KEY` to pre-fill products from photos. Without it the server still runs and only that route is off. `CLAUDE_MODEL` picks the model.
 
 Run Server
 ```bash
